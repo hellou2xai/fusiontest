@@ -36,7 +36,17 @@ async function main() {
     }
   }
 
-  console.log(`\n--- Contract-price variance (vs. excel/reference-prices.xlsx) ---`);
+  console.log(`\n--- Agreement-price variance (vs. real Oracle Fusion Blanket/Contract Agreements) ---`);
+  console.log(`  ${result.agreementVariance.agreementLinesLoaded} open agreement line(s) loaded, ${result.agreementVariance.matchedLines} matched an organic PO line.`);
+  console.log(`  Total overpaid vs. agreement price: $${usd(result.agreementVariance.totalOverpaidUSD)}`);
+  if (result.agreementVariance.note) console.log(`  ⚑ ${result.agreementVariance.note}`);
+  for (const l of result.agreementVariance.lines.slice(0, 10)) {
+    console.log(
+      `    ${l.orderNumber} "${l.description}" (agreement ${l.agreementNumber}, matched by ${l.matchedBy}) — agreement $${usd(l.agreementPrice)}, paid $${usd(l.paidUnitPrice)}, overpaid $${usd(l.overpaid)}`
+    );
+  }
+
+  console.log(`\n--- Contract-price variance (secondary, vs. excel/reference-prices.xlsx) ---`);
   if (result.contractVariance.referencePricesLoaded === 0) {
     console.log(`  No reference prices loaded — run "python excel/create_reference_template.py" and fill in real rates.`);
   } else {

@@ -78,6 +78,33 @@ def write_savings(book, data):
         sheet.range("A5").value = f"Note: {data['maverickSpend']['note']}"
 
     row = 7
+    av = data.get("agreementVariance", {"agreementLinesLoaded": 0, "matchedLines": 0, "totalOverpaidUSD": 0, "lines": [], "note": None})
+    sheet.range((row, 1)).value = "Agreement-Price Variance (real Oracle Fusion Blanket/Contract Agreements)"
+    sheet.range((row, 1)).font.bold = True
+    row += 1
+    sheet.range((row, 1)).value = (
+        f"Agreement lines loaded: {av['agreementLinesLoaded']}  |  Matched to organic POs: {av['matchedLines']}  |  "
+        f"Total overpaid vs. agreement price: ${money(av['totalOverpaidUSD']):,.2f}"
+    )
+    row += 1
+    if av.get("note"):
+        sheet.range((row, 1)).value = f"Note: {av['note']}"
+        row += 1
+    row += 1
+    av_header_row = row
+    write_header(sheet, row, ["Order #", "Description", "Agreement #", "Matched By", "Agreement Price", "Paid", "Overpaid"])
+    row += 1
+    for l in av["lines"]:
+        sheet.range((row, 1)).value = [
+            l["orderNumber"], l["description"], l["agreementNumber"], l["matchedBy"],
+            money(l["agreementPrice"]), money(l["paidUnitPrice"]), money(l["overpaid"]),
+        ]
+        row += 1
+    if av["lines"]:
+        sheet.range((av_header_row, 5), (row - 1, 7)).number_format = "#,##0.00"
+    row += 2
+
+    pv_header_row = row
     write_header(sheet, row, ["Description", "Category", "Min Price", "Max Price", "Ratio", "Occurrences", "Overpaid"])
     row += 1
     for g in data["priceVariance"]["groupsWithVariance"]:
@@ -86,9 +113,9 @@ def write_savings(book, data):
             round(g["priceRatio"], 1), g["occurrences"], money(g["lostSavings"]),
         ]
         row += 1
-    sheet.range("A7").expand("table").columns.autofit()
-    sheet.range((8, 3), (row - 1, 4)).number_format = "#,##0.00"
-    sheet.range((8, 7), (row - 1, 7)).number_format = "#,##0.00"
+    if data["priceVariance"]["groupsWithVariance"]:
+        sheet.range((pv_header_row + 1, 3), (row - 1, 4)).number_format = "#,##0.00"
+        sheet.range((pv_header_row + 1, 7), (row - 1, 7)).number_format = "#,##0.00"
 
     row += 2
     cv = data.get("contractVariance", {"referencePricesLoaded": 0, "totalOverpaidUSD": 0, "lines": []})
@@ -113,6 +140,8 @@ def write_savings(book, data):
     if cv["lines"]:
         sheet.range((cv_header_row, 3), (row - 1, 4)).number_format = "#,##0.00"
         sheet.range((cv_header_row, 6), (row - 1, 6)).number_format = "#,##0.00"
+
+    sheet.used_range.columns.autofit()
 
 
 def write_payables(book, data):

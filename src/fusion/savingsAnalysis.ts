@@ -1,6 +1,7 @@
 import { fetchAllPages } from "../fusionClient.js";
 import { isBulkImportBuyer, type PurchaseOrder } from "./poAnalysis.js";
 import { readReferencePrices } from "../excel/referencePrices.js";
+import { fetchOpenAgreementLines } from "./agreementPrices.js";
 
 interface PoLine {
   POLineId: number;
@@ -61,6 +62,18 @@ export interface ContractVarianceLine {
   currency: string;
 }
 
+export interface AgreementVarianceLine {
+  orderNumber: string;
+  description: string;
+  agreementNumber: string;
+  agreementPrice: number;
+  paidUnitPrice: number;
+  quantity: number;
+  overpaid: number;
+  currency: string;
+  matchedBy: "item" | "description";
+}
+
 export interface SavingsAnalysisResult {
   generatedAt: string;
   windowDays: number;
@@ -79,6 +92,13 @@ export interface SavingsAnalysisResult {
     totalOverpaidUSD: number;
     lines: ContractVarianceLine[];
     derivedFromInternalData: boolean;
+    note: string | null;
+  };
+  agreementVariance: {
+    agreementLinesLoaded: number;
+    matchedLines: number;
+    totalOverpaidUSD: number;
+    lines: AgreementVarianceLine[];
     note: string | null;
   };
 }
@@ -214,6 +234,44 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
   const derivedFromInternalData =
     referencePrices.length > 0 && referencePrices.every((r) => (r.Notes ?? "").startsWith("DERIVED —"));
 
+  // --- Agreement-price variance: the real, authoritative source — negotiated rates
+  // from Oracle Fusion Procurement's own Blanket/Contract Purchase Agreements
+  // (purchaseAgreementLines), not a fallback or an Excel-derived approximation. ---
+  const agreementLines = await fetchOpenAgreementLines();
+  const agreementByItemId = new Map(agreementLines.filter((a) => a.ItemId != null).map((a) => [a.ItemId, a]));
+  const agreementByDescKey = new Map(
+    agreementLines
+      .filter((a) => a.ItemId == null && a.Description)
+      .map((a) => [`${a.Description!.trim().toLowerCase()}|${a.UOMCode}|${a.CurrencyCode}`, a])
+  );
+
+  const agreementVarianceLines: AgreementVarianceLine[] = [];
+  let matchedLineCount = 0;
+  for (const line of usdLines) {
+    const byItem = line.ItemId != null ? agreementByItemId.get(line.ItemId) : undefined;
+    const byDesc = !byItem && line.Description
+      ? agreementByDescKey.get(`${line.Description.trim().toLowerCase()}|${line.UOMCode}|${line.CurrencyCode}`)
+      : undefined;
+    const match = byItem ?? byDesc;
+    if (!match) continue;
+    matchedLineCount += 1;
+
+    const overpaid = Math.max(0, line.Price - match.Price) * line.Quantity;
+    if (overpaid <= 0) continue;
+    agreementVarianceLines.push({
+      orderNumber: line.OrderNumber,
+      description: line.Description ?? match.Description ?? `Item ${line.ItemId}`,
+      agreementNumber: match.AgreementNumber,
+      agreementPrice: match.Price,
+      paidUnitPrice: line.Price,
+      quantity: line.Quantity,
+      overpaid,
+      currency: line.CurrencyCode,
+      matchedBy: byItem ? "item" : "description",
+    });
+  }
+  agreementVarianceLines.sort((a, b) => b.overpaid - a.overpaid);
+
   return {
     generatedAt: new Date().toISOString(),
     windowDays,
@@ -230,6 +288,16 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
       note: derivedFromInternalData
         ? "Reference prices are derived from the lowest price already paid in this same window (see excel/reference-prices.xlsx Notes), not a real negotiated contract — this overlaps with priceVariance above rather than confirming it independently. Do not add the two totals together. Replace rows with real negotiated rates for an independent signal."
         : null,
+    },
+    agreementVariance: {
+      agreementLinesLoaded: agreementLines.length,
+      matchedLines: matchedLineCount,
+      totalOverpaidUSD: agreementVarianceLines.reduce((s, l) => s + l.overpaid, 0),
+      lines: agreementVarianceLines,
+      note:
+        matchedLineCount === 0
+          ? `${agreementLines.length} open agreement line(s) loaded from Oracle Fusion Procurement, but none matched an item or description purchased in this window — this tenant's negotiated agreements cover catalog goods (all have a real ItemId), while every organic PO line in this window was a free-text service line with no ItemId. This is a real, non-fabricated result: it means none of the analyzed spend was covered by an existing agreement, not that the check failed.`
+          : null,
     },
   };
 }

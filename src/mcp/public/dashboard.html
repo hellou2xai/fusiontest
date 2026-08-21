@@ -202,6 +202,13 @@
     <div id="savings-callout"></div>
     <div class="kpi-row" id="savings-kpi-row"></div>
     <div>
+      <div class="section-head" style="border:none;padding:0.6rem 0 0.4rem"><h2 style="font-size:0.95rem">Agreement-price variance <span class="pill ok" style="margin-left:0.4rem">real Fusion data</span></h2></div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Order #</th><th>Description</th><th>Agreement</th><th>Matched by</th><th style="text-align:right">Agreement price</th><th style="text-align:right">Paid</th><th style="text-align:right">Overpaid</th></tr></thead>
+        <tbody id="agreement-body"></tbody>
+      </table></div>
+    </div>
+    <div>
       <div class="section-head" style="border:none;padding:0.6rem 0 0.4rem"><h2 style="font-size:0.95rem">Credible price variance</h2></div>
       <div class="table-scroll"><table>
         <thead><tr><th>Description</th><th>Category</th><th style="text-align:right">Min–Max</th><th style="text-align:right">Ratio</th><th style="text-align:right">Overpaid</th></tr></thead>
@@ -209,7 +216,7 @@
       </table></div>
     </div>
     <div>
-      <div class="section-head" style="border:none;padding:0.6rem 0 0.4rem"><h2 style="font-size:0.95rem">Contract-price variance (vs. reference-prices.xlsx)</h2></div>
+      <div class="section-head" style="border:none;padding:0.6rem 0 0.4rem"><h2 style="font-size:0.95rem">Contract-price variance (secondary, vs. reference-prices.xlsx)</h2></div>
       <div class="table-scroll"><table>
         <thead><tr><th>Order #</th><th>Description</th><th style="text-align:right">Contracted</th><th style="text-align:right">Paid</th><th style="text-align:right">Overpaid</th></tr></thead>
         <tbody id="contract-body"></tbody>
@@ -318,17 +325,27 @@
     const s = await fetch(`/api/savings-analysis?days=${savingsDays}`).then(r => r.json());
     document.getElementById("savings-note").textContent = `last ${s.windowDays}d · ${s.organicPoCount} POs, ${s.organicLineCount} lines`;
 
-    const callouts = [s.maverickSpend.note, s.contractVariance.note].filter(Boolean);
+    const callouts = [s.agreementVariance.note, s.maverickSpend.note, s.contractVariance.note].filter(Boolean);
     document.getElementById("savings-callout").innerHTML = callouts
       .map(note => `<div class="callout"><span class="mark">⚑</span><span>${note}</span></div>`).join("");
 
     const kpis = [
-      { label: "Credible overpayment", value: fmt(s.priceVariance.totalLostSavingsUSD, "USD"), sub: "plausible price variance", cls: "good" },
+      { label: "Agreement variance", value: fmt(s.agreementVariance.totalOverpaidUSD, "USD"), sub: `${s.agreementVariance.matchedLines} of ${s.agreementVariance.agreementLinesLoaded} agreement lines matched`, cls: "good" },
+      { label: "Credible overpayment", value: fmt(s.priceVariance.totalLostSavingsUSD, "USD"), sub: "peer-comparison, plausible", cls: "" },
       { label: "Flagged for review", value: fmt(s.priceVariance.totalFlaggedForReviewUSD, "USD"), sub: "likely data noise, excluded", cls: "" },
-      { label: "Contract variance", value: fmt(s.contractVariance.totalOverpaidUSD, "USD"), sub: s.contractVariance.derivedFromInternalData ? "derived, overlaps above" : `${s.contractVariance.referencePricesLoaded} reference price(s)`, cls: "warn" },
       { label: "Off-contract spend", value: `${(s.maverickSpend.offContractShare * 100).toFixed(0)}%`, sub: s.maverickSpend.dataQualityFlag ? "data-quality flagged" : "of organic spend", cls: "" },
     ];
     document.getElementById("savings-kpi-row").innerHTML = kpis.map(k => `<div class="kpi ${k.cls}"><span class="label">${k.label}</span><span class="value">${k.value}</span><span class="sub">${k.sub}</span></div>`).join("");
+
+    document.getElementById("agreement-body").innerHTML = s.agreementVariance.lines.length ? s.agreementVariance.lines.map(l => `<tr>
+      <td class="mono">${l.orderNumber}</td>
+      <td>${l.description}</td>
+      <td class="mono">${l.agreementNumber}</td>
+      <td>${l.matchedBy}</td>
+      <td class="num">${fmt(l.agreementPrice, l.currency)}</td>
+      <td class="num">${fmt(l.paidUnitPrice, l.currency)}</td>
+      <td class="num">${fmt(l.overpaid, l.currency)}</td>
+    </tr>`).join("") : `<tr><td colspan="7" class="empty">${s.agreementVariance.matchedLines === 0 ? "No organic PO lines matched an open Fusion agreement in this window" : "Matched lines found, none priced above the agreement rate"}</td></tr>`;
 
     document.getElementById("variance-body").innerHTML = s.priceVariance.groupsWithVariance.length ? s.priceVariance.groupsWithVariance.map(g => `<tr>
       <td>${g.description}</td>

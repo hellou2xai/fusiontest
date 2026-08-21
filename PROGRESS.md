@@ -165,23 +165,38 @@ history. Several filters exist specifically to keep numbers honest:
    are likely inflated by the same synthetic-data phenomenon as maverick spend. **No
    outlier filter has been added here yet** — treat the raw payables dollar totals as
    directional only, not demo-ready numbers, until this is addressed (see Next Steps).
-5. **Contract-price variance is only independent when the reference prices are
-   real.** `excel/populate_reference_from_savings.py` was added to fill
+5. **Contract-price variance (Excel-derived) is only independent when the reference
+   prices are real.** `excel/populate_reference_from_savings.py` fills
    `reference-prices.xlsx` with real, non-fabricated data — but the *only* real data
-   available in this demo tenant is "the lowest price already paid for this item,"
-   pulled from the same outlier-filtered `groupsWithVariance` used by the
-   price-variance check. That makes contract-variance **mathematically identical**
-   to price-variance when run this way — verified: both came back as exactly
-   $2,765,868.00 on the same run. `contractVariance.derivedFromInternalData` and
-   `.note` flag this automatically (detected via a `"DERIVED —"` prefix convention
-   in the Notes column), and the CLI/dashboard/Excel export all surface the caveat.
-   **Do not present both totals as if they confirm each other — they're the same
-   finding restated until real negotiated rates replace the derived rows.**
+   available for this is "the lowest price already paid for this item," pulled from
+   the same outlier-filtered `groupsWithVariance` used by the price-variance check.
+   That makes it **mathematically identical** to price-variance when run this way —
+   verified: both came back as exactly $2,765,868.00 on the same run.
+   `contractVariance.derivedFromInternalData` and `.note` flag this automatically,
+   surfaced in the CLI/dashboard/Excel export. **Superseded as the primary signal**
+   by agreement-price variance below — kept as a secondary check.
+6. **Agreement-price variance is the real fix — genuinely independent, verified.**
+   `src/fusion/agreementPrices.ts` queries Oracle Fusion Procurement's own
+   `purchaseAgreementLines` (Blanket + Contract Purchase Agreements, 4,959 open
+   lines on this tenant) and matches by `ItemId` first, `Description`+`UOM`+
+   `Currency` as fallback. This was built in direct response to the user asking
+   "did you check the blanket agreement... that's the best way to find on Oracle
+   Fusion" — they were right, and this is the correct mechanism, not a workaround.
+   Verified result on the 90-day window: 8 of 4,959 agreement lines matched an
+   organic PO line; only 1 was actually priced above the agreement rate —
+   **$13.00 overpaid** (`SU617153`, "Belt Ware Sensor", agreement 27339). Small
+   because this tenant's agreements mostly cover catalog goods while the earlier
+   price-variance findings were free-text services with no `ItemId` — but this is
+   the one number in the whole savings analysis that needs **zero caveats**: it's
+   real Oracle data compared to real Oracle data, no derivation, no fabrication.
+   `agreementVariance.note` explains the low match count when it happens (it isn't
+   a bug). **This should be the headline signal in any demo**, with price-variance
+   and contract-variance kept as supporting/exploratory signals underneath it.
 
 **Do not fabricate negotiated rates to make this look more independent.** If asked
-to "put in real rates," there are none available in this demo tenant — the honest
-options are (a) leave it as internally-derived with the caveat surfaced (current
-state), or (b) get an actual contracted-rate source from the user. Inventing
+to "put in real rates," check `purchaseAgreementLines` first (see above) — that's
+the actual authoritative source. Only fall back to Excel-derived/internal data when
+no real coverage exists, and always with the caveat. Inventing
 plausible numbers was explicitly rejected this session in favor of (a).
 
 ## What's built and verified working (this session)
@@ -270,23 +285,26 @@ plausible numbers was explicitly rejected this session in favor of (a).
 
 ## Next steps (prioritized)
 
-1. **Get a real negotiated-rate source and put it into `excel/reference-prices.xlsx`.**
-   It currently has 10 rows auto-populated by `populate_reference_from_savings.py`
-   from internal data (see the caveat above) — genuinely useful for demoing the
-   Excel *mechanism*, but not an independent savings number until real contract
-   rates replace them. This is the highest-leverage next step.
-2. **Visually QA the redesigned dashboard in an actual browser.** It was built and
+1. **Widen agreement-price variance coverage.** It's the one fully-independent,
+   caveat-free signal (see above), but only matched 8 of 3,384 organic lines on a
+   90-day window because this tenant's agreements are goods-heavy and organic spend
+   was services-heavy. Try a longer window (1 year — see below), and/or check
+   whether Fusion has a services-category agreement type not yet queried.
+2. Excel-derived contract-price variance (`excel/reference-prices.xlsx`) is now
+   secondary. Real negotiated rates would still make it independent, but
+   agreement-price variance is the better investment of effort going forward.
+3. **Visually QA the redesigned dashboard in an actual browser.** It was built and
    every REST endpoint it calls was individually curl-tested, but nobody has loaded
    `http://localhost:8787/dashboard` and looked at it — check the sidebar layout,
    the PO drill-down search, and the Export to Excel button actually work end to
    end from the UI, not just via curl.
-3. **Add outlier/sanity filtering to `payablesAnalysis.ts`**, mirroring what
+4. **Add outlier/sanity filtering to `payablesAnalysis.ts`**, mirroring what
    `savingsAnalysis.ts` already does — the raw non-PO invoice totals are currently
    not demo-credible for the same reason the pre-fix savings numbers weren't.
-4. **Resolve MCP project-scope approval** on whatever machine is used next — see
+5. **Resolve MCP project-scope approval** on whatever machine is used next — see
    "MCP registration status" above.
-5. **Consider tightening price-variance grouping** (e.g. add Supplier to the group
+6. **Consider tightening price-variance grouping** (e.g. add Supplier to the group
    key, not just Description+UOM) if the current 5x-ratio outlier filter alone isn't
    convincing enough for a live audience — discussed but not implemented.
-6. **Write-back capability** for the "mindblowing demo" upgrade — not started, needs
+7. **Write-back capability** for the "mindblowing demo" upgrade — not started, needs
    explicit scoping (which action, what guardrails) before building.
