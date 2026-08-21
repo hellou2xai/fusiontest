@@ -96,7 +96,11 @@ def write_savings(book, data):
     sheet.range((row, 1)).font.bold = True
     row += 1
     sheet.range((row, 1)).value = f"Reference prices loaded: {cv['referencePricesLoaded']}  |  Total overpaid vs. contract: ${money(cv['totalOverpaidUSD']):,.2f}"
-    row += 2
+    row += 1
+    if cv.get("note"):
+        sheet.range((row, 1)).value = f"Note: {cv['note']}"
+        row += 1
+    row += 1
     cv_header_row = row
     write_header(sheet, row, ["Order #", "Description", "Contracted", "Paid", "Qty", "Overpaid"])
     row += 1

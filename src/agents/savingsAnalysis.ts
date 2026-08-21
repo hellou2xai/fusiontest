@@ -42,6 +42,7 @@ async function main() {
   } else {
     console.log(`  ${result.contractVariance.referencePricesLoaded} reference price(s) loaded.`);
     console.log(`  Total overpaid vs. contracted rate: $${usd(result.contractVariance.totalOverpaidUSD)}`);
+    if (result.contractVariance.note) console.log(`  ⚑ ${result.contractVariance.note}`);
     for (const l of result.contractVariance.lines.slice(0, 10)) {
       console.log(
         `    ${l.orderNumber} "${l.description}" — contracted $${usd(l.contractedUnitPrice)}, paid $${usd(l.paidUnitPrice)}, overpaid $${usd(l.overpaid)}`

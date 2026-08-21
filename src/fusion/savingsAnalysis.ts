@@ -78,6 +78,8 @@ export interface SavingsAnalysisResult {
     referencePricesLoaded: number;
     totalOverpaidUSD: number;
     lines: ContractVarianceLine[];
+    derivedFromInternalData: boolean;
+    note: string | null;
   };
 }
 
@@ -204,6 +206,14 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
   }
   contractVarianceLines.sort((a, b) => b.overpaid - a.overpaid);
 
+  // Reference rows produced by excel/populate_reference_from_savings.py are tagged
+  // "DERIVED —" in Notes: their "contracted" price is just the lowest price already
+  // seen in THIS SAME price-variance computation, so any resulting overpayment
+  // overlaps with priceVariance.totalLostSavingsUSD rather than confirming it
+  // independently. Do not sum the two totals — surface the overlap instead.
+  const derivedFromInternalData =
+    referencePrices.length > 0 && referencePrices.every((r) => (r.Notes ?? "").startsWith("DERIVED —"));
+
   return {
     generatedAt: new Date().toISOString(),
     windowDays,
@@ -216,6 +226,10 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
       referencePricesLoaded: referencePrices.length,
       totalOverpaidUSD: contractVarianceLines.reduce((s, l) => s + l.overpaid, 0),
       lines: contractVarianceLines,
+      derivedFromInternalData,
+      note: derivedFromInternalData
+        ? "Reference prices are derived from the lowest price already paid in this same window (see excel/reference-prices.xlsx Notes), not a real negotiated contract — this overlaps with priceVariance above rather than confirming it independently. Do not add the two totals together. Replace rows with real negotiated rates for an independent signal."
+        : null,
     },
   };
 }

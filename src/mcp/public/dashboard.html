@@ -318,13 +318,14 @@
     const s = await fetch(`/api/savings-analysis?days=${savingsDays}`).then(r => r.json());
     document.getElementById("savings-note").textContent = `last ${s.windowDays}d · ${s.organicPoCount} POs, ${s.organicLineCount} lines`;
 
-    document.getElementById("savings-callout").innerHTML = s.maverickSpend.note
-      ? `<div class="callout"><span class="mark">⚑</span><span>${s.maverickSpend.note}</span></div>` : "";
+    const callouts = [s.maverickSpend.note, s.contractVariance.note].filter(Boolean);
+    document.getElementById("savings-callout").innerHTML = callouts
+      .map(note => `<div class="callout"><span class="mark">⚑</span><span>${note}</span></div>`).join("");
 
     const kpis = [
       { label: "Credible overpayment", value: fmt(s.priceVariance.totalLostSavingsUSD, "USD"), sub: "plausible price variance", cls: "good" },
       { label: "Flagged for review", value: fmt(s.priceVariance.totalFlaggedForReviewUSD, "USD"), sub: "likely data noise, excluded", cls: "" },
-      { label: "Contract variance", value: fmt(s.contractVariance.totalOverpaidUSD, "USD"), sub: `${s.contractVariance.referencePricesLoaded} reference price(s) loaded`, cls: "warn" },
+      { label: "Contract variance", value: fmt(s.contractVariance.totalOverpaidUSD, "USD"), sub: s.contractVariance.derivedFromInternalData ? "derived, overlaps above" : `${s.contractVariance.referencePricesLoaded} reference price(s)`, cls: "warn" },
       { label: "Off-contract spend", value: `${(s.maverickSpend.offContractShare * 100).toFixed(0)}%`, sub: s.maverickSpend.dataQualityFlag ? "data-quality flagged" : "of organic spend", cls: "" },
     ];
     document.getElementById("savings-kpi-row").innerHTML = kpis.map(k => `<div class="kpi ${k.cls}"><span class="label">${k.label}</span><span class="value">${k.value}</span><span class="sub">${k.sub}</span></div>`).join("");

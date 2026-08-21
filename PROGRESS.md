@@ -165,15 +165,24 @@ history. Several filters exist specifically to keep numbers honest:
    are likely inflated by the same synthetic-data phenomenon as maverick spend. **No
    outlier filter has been added here yet** — treat the raw payables dollar totals as
    directional only, not demo-ready numbers, until this is addressed (see Next Steps).
-5. **Contract-price variance is the strongest, most defensible signal built** — it
-   compares actual PO line prices against `excel/reference-prices.xlsx` (a real
-   negotiated-rate reference), so there's no fuzzy description-matching or outlier
-   guesswork involved. Verified result: **$1.7M overpaid vs. contracted rates** on
-   just 3 loaded reference prices. The catch: the reference file currently only has
-   3 EXAMPLE rows (chosen to match categories already seen in the price-variance
-   findings) — **replace with real negotiated rates** before presenting this as a
-   real number. This is the one savings signal worth demoing without heavy caveats
-   once real rates are in the file.
+5. **Contract-price variance is only independent when the reference prices are
+   real.** `excel/populate_reference_from_savings.py` was added to fill
+   `reference-prices.xlsx` with real, non-fabricated data — but the *only* real data
+   available in this demo tenant is "the lowest price already paid for this item,"
+   pulled from the same outlier-filtered `groupsWithVariance` used by the
+   price-variance check. That makes contract-variance **mathematically identical**
+   to price-variance when run this way — verified: both came back as exactly
+   $2,765,868.00 on the same run. `contractVariance.derivedFromInternalData` and
+   `.note` flag this automatically (detected via a `"DERIVED —"` prefix convention
+   in the Notes column), and the CLI/dashboard/Excel export all surface the caveat.
+   **Do not present both totals as if they confirm each other — they're the same
+   finding restated until real negotiated rates replace the derived rows.**
+
+**Do not fabricate negotiated rates to make this look more independent.** If asked
+to "put in real rates," there are none available in this demo tenant — the honest
+options are (a) leave it as internally-derived with the caveat surfaced (current
+state), or (b) get an actual contracted-rate source from the user. Inventing
+plausible numbers was explicitly rejected this session in favor of (a).
 
 ## What's built and verified working (this session)
 
@@ -261,10 +270,11 @@ history. Several filters exist specifically to keep numbers honest:
 
 ## Next steps (prioritized)
 
-1. **Put real negotiated rates into `excel/reference-prices.xlsx`.** It currently
-   only has 3 example rows. This is the highest-leverage next step — contract-price
-   variance is the most defensible savings signal built, and it's only as good as
-   the reference data in the file.
+1. **Get a real negotiated-rate source and put it into `excel/reference-prices.xlsx`.**
+   It currently has 10 rows auto-populated by `populate_reference_from_savings.py`
+   from internal data (see the caveat above) — genuinely useful for demoing the
+   Excel *mechanism*, but not an independent savings number until real contract
+   rates replace them. This is the highest-leverage next step.
 2. **Visually QA the redesigned dashboard in an actual browser.** It was built and
    every REST endpoint it calls was individually curl-tested, but nobody has loaded
    `http://localhost:8787/dashboard` and looked at it — check the sidebar layout,
