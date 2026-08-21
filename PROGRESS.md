@@ -199,6 +199,39 @@ the actual authoritative source. Only fall back to Excel-derived/internal data w
 no real coverage exists, and always with the caveat. Inventing
 plausible numbers was explicitly rejected this session in favor of (a).
 
+### Synthetic-data audit (user explicitly required: no synthetic data in the demo)
+
+Full audit, done on request. **Only one thing in this whole project was ever
+synthetic**: the original 3 example rows in `excel/reference-prices.xlsx`
+(hand-typed placeholder numbers — $1,450,000 insurance, etc.), created by
+`create_reference_template.py`. Everything else — every PO, line, schedule,
+distribution, invoice, and agreement number in every report — comes from live
+Fusion API calls, never fabricated.
+
+Fixed:
+- `reference-prices.xlsx` is now **headers-only, zero rows** — cleared of both
+  the original hand-typed examples and the later `populate_reference_from_savings.py`
+  derived rows (real data, but computed outside Fusion, not an actual system
+  record — decided this shouldn't be presented as "from system" either, even
+  though it wasn't fabricated).
+- `create_reference_template.py` no longer contains `EXAMPLE_ROWS` at all —
+  it now generates headers-only, so running it again can't reintroduce fake
+  numbers. Its docstring explicitly says not to add hardcoded examples back.
+- `contractVariance` (the Excel-derived signal) will now correctly report 0
+  reference prices loaded / $0 overpaid until someone fills the workbook with
+  real negotiated rates or runs `populate_reference_from_savings.py` again
+  (derived, not synthetic, but still not from-system — treat as opt-in, not
+  part of the default demo narrative).
+- **Agreement-price variance is unaffected and remains the one clean, fully
+  system-sourced "vs. negotiated rate" signal** — nothing to fix there.
+
+The bulk-import-buyer filter and the 5x price-ratio outlier filter are **not**
+synthetic-data issues — they exclude real Fusion records from headline totals
+because those records aren't representative organic activity (other users'
+interface tests, or implausible data-entry errors), the same way you'd exclude
+test transactions from a real report. The underlying records are real; nothing
+is invented.
+
 ## What's built and verified working (this session)
 
 - ✅ `npm run po:analyze` — 30-day PO analysis, writes `reports/po-analysis-<date>.{json,md}`

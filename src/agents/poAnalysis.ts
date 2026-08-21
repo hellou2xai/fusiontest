@@ -12,7 +12,8 @@ function formatCurrencyTotals(totals: Record<string, number>): string {
 }
 
 async function main() {
-  const result = await runPoAnalysis(30);
+  const windowDays = Number(process.argv[2] ?? 30);
+  const result = await runPoAnalysis(windowDays);
 
   console.log(`Fetched ${result.totalPurchaseOrders} purchase order(s) since ${result.sinceDate}.`);
   console.log(`  organic: ${result.organicPurchaseOrders}, bulk-import: ${result.bulkImportPurchaseOrders}`);
