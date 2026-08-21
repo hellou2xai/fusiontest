@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fusion Agents — Live Dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #f6f4ee; --paper-raised: #ffffff; --ink: #1c2128; --ink-soft: #565048; --ink-faint: #8a8478;
+    --hairline: #ddd7c9; --accent: #2f5d8a; --accent-soft: #e3ebf3;
+    --good: #3f7d55; --good-soft: #e4efe6; --warn: #b3792a; --warn-soft: #f5ebd9;
+    --crit: #a8483f; --crit-soft: #f4e2df; --bar-track: #e9e4d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14171c; --paper-raised: #1b1f26; --ink: #e9e6dd; --ink-soft: #a9a396; --ink-faint: #766f62;
+      --hairline: #2c313a; --accent: #7fb0e0; --accent-soft: #22303f;
+      --good: #7fbf94; --good-soft: #1e2e24; --warn: #dcab5f; --warn-soft: #332a1a;
+      --crit: #e0938a; --crit-soft: #3a2523; --bar-track: #262b33;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #14171c; --paper-raised: #1b1f26; --ink: #e9e6dd; --ink-soft: #a9a396; --ink-faint: #766f62;
+    --hairline: #2c313a; --accent: #7fb0e0; --accent-soft: #22303f;
+    --good: #7fbf94; --good-soft: #1e2e24; --warn: #dcab5f; --warn-soft: #332a1a;
+    --crit: #e0938a; --crit-soft: #3a2523; --bar-track: #262b33;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans", system-ui, sans-serif; margin: 0; padding: clamp(1.25rem, 4vw, 3rem); line-height: 1.5; }
+  .wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+  .title-block { display: flex; flex-direction: column; gap: 0.4rem; }
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 0.5rem; }
+  .eyebrow::before { content: "●"; font-size: 0.55rem; }
+  h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: clamp(1.7rem, 3.5vw, 2.3rem); margin: 0; text-wrap: balance; }
+  .controls { display: flex; align-items: center; gap: 0.6rem; font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; color: var(--ink-soft); }
+  select, button { font: inherit; font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid var(--hairline); background: var(--paper-raised); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; }
+  .status-dot.err { background: var(--crit); }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; }
+  .kpi { background: var(--paper-raised); padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .kpi .label { font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); }
+  .kpi .value { font-family: "IBM Plex Mono", monospace; font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .sub { font-size: 0.76rem; color: var(--ink-soft); }
+  .kpi.accent .value { color: var(--accent); }
+  .kpi .delta { font-family: "IBM Plex Mono", monospace; font-size: 0.76rem; }
+  .kpi .delta.up { color: var(--good); } .kpi .delta.down { color: var(--crit); } .kpi .delta.flat { color: var(--ink-faint); }
+
+  section { display: flex; flex-direction: column; gap: 0.85rem; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--hairline); padding-bottom: 0.5rem; }
+  h2 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 1.15rem; margin: 0; }
+  .section-note { font-size: 0.76rem; color: var(--ink-faint); font-family: "IBM Plex Mono", monospace; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
+  @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .bar-list { display: flex; flex-direction: column; gap: 0.6rem; }
+  .bar-row { display: grid; grid-template-columns: 1fr auto; gap: 0.12rem 0.7rem; align-items: baseline; }
+  .bar-row .name { font-size: 0.86rem; }
+  .bar-row .amount { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; color: var(--ink-soft); }
+  .bar-track { grid-column: 1 / -1; height: 6px; background: var(--bar-track); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+
+  .pill { display: inline-flex; align-items: center; font-size: 0.72rem; font-family: "IBM Plex Mono", monospace; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 500; white-space: nowrap; }
+  .pill.open { background: var(--accent-soft); color: var(--accent); }
+  .pill.closed { background: var(--good-soft); color: var(--good); }
+  .pill.pending { background: var(--warn-soft); color: var(--warn); }
+  .pill.incomplete { background: var(--crit-soft); color: var(--crit); }
+  .pill.ok { background: var(--good-soft); color: var(--good); }
+  .pill.error { background: var(--crit-soft); color: var(--crit); }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 10px; max-height: 420px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.84rem; }
+  thead th { text-align: left; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; padding: 0.6rem 0.8rem; background: var(--paper-raised); border-bottom: 1px solid var(--hairline); position: sticky; top: 0; }
+  tbody td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--accent-soft); }
+  td.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td.mono { font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; color: var(--ink-soft); white-space: nowrap; }
+
+  .empty { color: var(--ink-faint); font-size: 0.86rem; padding: 1rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-block">
+      <div class="eyebrow" id="env-label">connecting…</div>
+      <h1>Fusion Agents — Live Dashboard</h1>
+    </div>
+    <div class="controls">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">loading</span>
+      <select id="days-select">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+      </select>
+      <button id="refresh-btn">Refresh</button>
+    </div>
+  </header>
+
+  <div class="kpi-row" id="kpi-row"></div>
+
+  <section>
+    <div class="section-head"><h2>By Status</h2><span class="section-note" id="status-note"></span></div>
+    <div class="bar-list" id="status-bars"></div>
+  </section>
+
+  <div class="grid-2">
+    <section>
+      <div class="section-head"><h2>By Supplier</h2><span class="section-note">by order count</span></div>
+      <div class="bar-list" id="supplier-bars"></div>
+    </section>
+    <section>
+      <div class="section-head"><h2>By Buyer</h2><span class="section-note">by order count</span></div>
+      <div class="bar-list" id="buyer-bars"></div>
+    </section>
+  </div>
+
+  <section>
+    <div class="section-head"><h2>Purchase Order Detail</h2><span class="section-note" id="detail-note"></span></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Order #</th><th>Status</th><th>BU</th><th>Buyer</th><th>Supplier</th><th style="text-align:right">Total</th><th>Order date</th></tr></thead>
+      <tbody id="po-body"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Run History</h2><span class="section-note">memory of past po_analysis snapshots</span></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Snapshot</th><th>Generated</th><th style="text-align:right">Organic POs</th><th style="text-align:right">Bulk-import</th><th style="text-align:right">Organic USD</th></tr></thead>
+      <tbody id="history-body"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Tool Call Log</h2><span class="section-note">observability — recent MCP tool invocations</span></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Time</th><th>Tool</th><th>Status</th><th style="text-align:right">Duration</th><th style="text-align:right">Records</th></tr></thead>
+      <tbody id="log-body"></tbody>
+    </table></div>
+  </section>
+</div>
+
+<script>
+  const fmt = (n, ccy) => (n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (ccy ? " " + ccy : "");
+  const fmtCompact = (n) => { const a = Math.abs(n); if (a >= 1e9) return (n/1e9).toFixed(2)+"B"; if (a >= 1e6) return (n/1e6).toFixed(2)+"M"; if (a >= 1e3) return (n/1e3).toFixed(1)+"K"; return n.toFixed(2); };
+  const dateFmt = (iso) => iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  const statusClass = (s) => { const v = (s||"").toLowerCase(); if (v.includes("open")) return "open"; if (v.includes("closed")) return "closed"; if (v.includes("pending")) return "pending"; return "incomplete"; };
+
+  function renderBars(id, groups, limit) {
+    const rows = (groups || []).slice(0, limit || groups.length);
+    const max = Math.max(...rows.map(g => g.count), 1);
+    document.getElementById(id).innerHTML = rows.length ? rows.map(g => {
+      const totalStr = Object.entries(g.totalByCurrency).filter(([,v]) => v).map(([c,v]) => fmtCompact(v)+" "+c).join(", ") || "—";
+      return `<div class="bar-row"><span class="name">${g.key ?? "<i>Unspecified</i>"}</span><span class="amount">${g.count} · ${totalStr}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.round(g.count/max*100)}%"></span></span></div>`;
+    }).join("") : '<div class="empty">No data in this window</div>';
+  }
+
+  async function loadAll() {
+    const dot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+    const days = document.getElementById("days-select").value;
+    try {
+      const [analysis, history, logs] = await Promise.all([
+        fetch(`/api/po-analysis?days=${days}`).then(r => r.json()),
+        fetch(`/api/history`).then(r => r.json()),
+        fetch(`/api/logs?limit=30`).then(r => r.json()),
+      ]);
+
+      document.getElementById("env-label").textContent = "fusion mcp server · live";
+      document.getElementById("status-note").textContent = `share of ${analysis.organicPurchaseOrders} organic POs`;
+      document.getElementById("detail-note").textContent = `${analysis.organicPurchaseOrders} organic · ${analysis.bulkImportPurchaseOrders} bulk-import excluded from breakdowns`;
+
+      const totalUSD = analysis.organicTotalByCurrency.USD ?? 0;
+      const kpis = [
+        { label: "Organic POs", value: String(analysis.organicPurchaseOrders), sub: `last ${analysis.windowDays}d`, cls: "accent" },
+        { label: "Organic spend", value: fmt(totalUSD, "USD"), sub: "USD-denominated", cls: "accent" },
+        { label: "Total incl. bulk", value: String(analysis.totalPurchaseOrders), sub: `${analysis.bulkImportPurchaseOrders} bulk-import`, cls: "" },
+        { label: "Suppliers", value: String(analysis.bySupplier.length), sub: "distinct", cls: "" },
+      ];
+      document.getElementById("kpi-row").innerHTML = kpis.map(k => `<div class="kpi ${k.cls}"><span class="label">${k.label}</span><span class="value">${k.value}</span><span class="sub">${k.sub}</span></div>`).join("");
+
+      renderBars("status-bars", analysis.byStatus);
+      renderBars("supplier-bars", analysis.bySupplier, 8);
+      renderBars("buyer-bars", analysis.byBuyer);
+
+      const organicPos = analysis.purchaseOrders.filter(p => !p.isBulkImport);
+      document.getElementById("po-body").innerHTML = organicPos.length ? organicPos.map(p => `<tr>
+        <td class="mono">${p.orderNumber}</td>
+        <td><span class="pill ${statusClass(p.status)}">${p.status}</span></td>
+        <td>${p.procurementBU}</td>
+        <td>${p.buyer}</td>
+        <td>${p.supplier ?? "—"}</td>
+        <td class="num">${fmt(p.total, p.currency)}</td>
+        <td class="mono">${dateFmt(p.orderDate)}</td>
+      </tr>`).join("") : '<tr><td colspan="7" class="empty">No organic purchase orders in this window</td></tr>';
+
+      document.getElementById("history-body").innerHTML = history.snapshots.length ? history.snapshots.slice().reverse().map(s => `<tr>
+        <td class="mono">${s.file}</td>
+        <td class="mono">${dateFmt(s.generatedAt)}</td>
+        <td class="num">${s.organicPurchaseOrders}</td>
+        <td class="num">${s.bulkImportPurchaseOrders}</td>
+        <td class="num">${fmt(s.organicTotalByCurrency.USD ?? 0)}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="empty">No persisted snapshots yet — run the CLI agent to create one</td></tr>';
+
+      document.getElementById("log-body").innerHTML = logs.length ? logs.map(l => `<tr>
+        <td class="mono">${dateFmt(l.ts)}</td>
+        <td class="mono">${l.tool}</td>
+        <td><span class="pill ${l.status}">${l.status}</span></td>
+        <td class="num">${l.durationMs} ms</td>
+        <td class="num">${l.recordCount ?? "—"}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="empty">No tool calls logged yet</td></tr>';
+
+      dot.classList.remove("err");
+      statusText.textContent = "live · updated " + new Date().toLocaleTimeString();
+    } catch (err) {
+      dot.classList.add("err");
+      statusText.textContent = "error: " + err.message;
+    }
+  }
+
+  document.getElementById("refresh-btn").addEventListener("click", loadAll);
+  document.getElementById("days-select").addEventListener("change", loadAll);
+  loadAll();
+  setInterval(loadAll, 30000);
+</script>
+</body>
+</html>

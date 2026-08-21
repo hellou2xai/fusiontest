@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fusion-agents": {
+      "command": "npx",
+      "args": ["tsx", "src/mcp/stdioServer.ts"]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "fusiontest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agents for Oracle Fusion Cloud ERP",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "po:analyze": "tsx src/agents/poAnalysis.ts",
+    "mcp:stdio": "tsx src/mcp/stdioServer.ts",
+    "mcp:http": "tsx src/mcp/httpServer.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^16.4.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
