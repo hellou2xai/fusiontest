@@ -1,4 +1,4 @@
-import { fetchAllPages } from "../fusionClient.js";
+import { fetchAllPages, mapWithConcurrency } from "../fusionClient.js";
 import { isBulkImportBuyer, type PurchaseOrder } from "./poAnalysis.js";
 import { readReferencePrices } from "../excel/referencePrices.js";
 import { fetchOpenAgreementLines } from "./agreementPrices.js";
@@ -119,11 +119,13 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
   const organicHeaders = rawHeaders.filter((h) => !isBulkImportBuyer(h.Buyer));
   const organicHeaderIds = organicHeaders.map((h) => h.POHeaderId);
 
-  const allLines: PoLine[] = [];
-  for (const headerId of organicHeaderIds) {
-    const lines = await fetchAllPages<PoLine>(`purchaseOrders/${headerId}/child/lines`, {});
-    allLines.push(...lines);
-  }
+  // Fetching lines is one API call per PO — sequential would be 1,000+ round-trips
+  // on a 1-year window (10+ minutes). Bounded concurrency keeps this to seconds
+  // without hammering the shared Fusion pod hard enough to trip rate limits.
+  const linesPerHeader = await mapWithConcurrency(organicHeaderIds, 12, (headerId) =>
+    fetchAllPages<PoLine>(`purchaseOrders/${headerId}/child/lines`, {})
+  );
+  const allLines: PoLine[] = linesPerHeader.flat();
 
   // --- Maverick / off-contract spend ---
   const usdLines = allLines.filter((l) => l.CurrencyCode === "USD");

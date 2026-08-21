@@ -1,4 +1,4 @@
-import { fetchAllPages } from "../fusionClient.js";
+import { fetchAllPages, mapWithConcurrency } from "../fusionClient.js";
 
 export interface PoSchedule {
   LineLocationId: number;
@@ -69,24 +69,25 @@ export async function fetchCompletePoDataset(orderNumber: string): Promise<Compl
 
   const rawLines = await fetchAllPages<Record<string, unknown>>(`purchaseOrders/${headerId}/child/lines`, {});
 
-  const lines: PoDatasetLine[] = [];
-  for (const line of rawLines) {
+  // A PO with N lines needs N schedule fetches, each followed by a distributions
+  // fetch per schedule — sequentially that's 2N+ round-trips (~40s+ for a 24-line
+  // PO). Parallelize both levels.
+  const lines: PoDatasetLine[] = await mapWithConcurrency(rawLines, 8, async (line) => {
     const lineId = line.POLineId as number;
     const schedules = await fetchAllPages<PoSchedule>(
       `purchaseOrders/${headerId}/child/lines/${lineId}/child/schedules`,
       {}
     );
 
-    const schedulesWithDistributions = [];
-    for (const schedule of schedules) {
-      const distributions = await fetchAllPages<PoDistribution>(
+    const schedulesWithDistributions = await mapWithConcurrency(schedules, 8, async (schedule) => ({
+      ...schedule,
+      distributions: await fetchAllPages<PoDistribution>(
         `purchaseOrders/${headerId}/child/lines/${lineId}/child/schedules/${schedule.LineLocationId}/child/distributions`,
         {}
-      );
-      schedulesWithDistributions.push({ ...schedule, distributions });
-    }
+      ),
+    }));
 
-    lines.push({
+    return {
       POLineId: lineId,
       LineNumber: line.LineNumber as number,
       Description: line.Description as string | null,
@@ -98,8 +99,8 @@ export async function fetchCompletePoDataset(orderNumber: string): Promise<Compl
       CurrencyCode: line.CurrencyCode as string,
       SourceAgreementNumber: line.SourceAgreementNumber as string | null,
       schedules: schedulesWithDistributions,
-    });
-  }
+    };
+  });
 
   return {
     orderNumber,

@@ -403,10 +403,21 @@
     </tr>`).join("") : '<tr><td colspan="5" class="empty">No tool calls logged yet</td></tr>';
   }
 
+  let isLoading = false;
+
   async function loadAll() {
+    if (isLoading) return; // avoid overlapping requests if a previous large-window load is still in flight
+    isLoading = true;
     const dot = document.getElementById("status-dot");
     const statusText = document.getElementById("status-text");
-    const days = Number(document.getElementById("days-select").value);
+    const refreshBtn = document.getElementById("refresh-btn");
+    const daysSelect = document.getElementById("days-select");
+    const days = Number(daysSelect.value);
+
+    refreshBtn.disabled = true;
+    daysSelect.disabled = true;
+    statusText.textContent = days >= 90 ? "loading (larger windows can take 20-60s — fetching real Fusion data)…" : "loading…";
+
     try {
       await Promise.all([loadPo(days), loadSavings(days), loadPayables(days), loadHistoryAndLogs()]);
       dot.classList.remove("err");
@@ -414,6 +425,10 @@
     } catch (err) {
       dot.classList.add("err");
       statusText.textContent = "error: " + err.message;
+    } finally {
+      refreshBtn.disabled = false;
+      daysSelect.disabled = false;
+      isLoading = false;
     }
   }
 

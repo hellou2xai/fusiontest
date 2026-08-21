@@ -59,7 +59,11 @@ CLI, MCP stdio, MCP HTTP, and REST).
 src/
   config.ts              Loads .env (anchored to project root, not cwd)
   paths.ts               PROJECT_ROOT / REPORTS_DIR / LOGS_DIR, also anchored
-  fusionClient.ts         fetchAllPages() — generic paginated Fusion REST GET helper
+  fusionClient.ts         fetchAllPages() — generic paginated Fusion REST GET helper.
+                          Also mapWithConcurrency() — use this for ANY per-item fetch
+                          loop (one call per PO, per line, etc.); a sequential loop
+                          over 1,000+ items is the difference between seconds and
+                          10+ minutes (see "Known issues fixed" below)
   fusion/
     poAnalysis.ts          Core: PO headers in a window, organic vs bulk-import split,
                             group-bys (status/supplier/buyer/BU)
@@ -100,17 +104,32 @@ src/
                             Run History / Tool Log, plus an "Export to Excel" button
                             wired to POST /api/export-excel
 excel/
-  create_reference_template.py  Run once to seed excel/reference-prices.xlsx
-  reference-prices.xlsx         The negotiated-rate reference file (NOT gitignored
-                            currently — contains only example/placeholder rates
-                            right now, safe to commit; replace with real rates and
-                            reconsider before committing real contract data)
-  read_reference_prices.py      Headless (visible=False) read, called by
-                            referencePrices.ts as a subprocess
-  write_report.py               Writes reports/*.json into reports/fusion-report.xlsx
-                            (gitignored). Visible by default (demo moment — watching
-                            Excel populate live); --hidden flag used by the REST
-                            export endpoint
+  create_reference_template.py  Run once to seed a HEADERS-ONLY reference-prices.xlsx
+                            (no example rows — see synthetic-data audit below)
+  reference-prices.xlsx         The negotiated-rate reference file. Currently
+                            headers-only / empty (no synthetic data active).
+  report_sections.py            Shared sheet-writing logic (write_po_summary /
+                            write_savings / write_payables) — used by BOTH
+                            write_report.py and refresh_from_reports.py so the
+                            CLI export and the in-Excel button stay identical
+  read_reference_prices.py      Live-attaches if reference-prices.xlsx is
+                            already open (reads unsaved edits, reports
+                            liveAttached: true); otherwise opens headlessly
+                            from disk. Called by referencePrices.ts.
+  write_report.py               Writes reports/*.json into reports/fusion-report.xlsx.
+                            Live-attaches if Excel is already running (writes
+                            directly into the visible sheet); otherwise starts
+                            a new instance (visible by default, --hidden for
+                            the REST export endpoint)
+  refresh_from_reports.py       RunPython target for the in-workbook button —
+                            re-reads latest reports/*.json into xw.Book.caller()
+  add_refresh_button.py         One-time setup: imports xlwings.bas directly
+                            into fusion-report.xlsx's own VBA project (doesn't
+                            depend on Excel's global add-in), pins the correct
+                            Python interpreter via a hidden config sheet, and
+                            adds the "Refresh from Fusion" button + macro. Run
+                            again any time reports/fusion-report.xlsx is
+                            recreated from scratch.
 reports/                  Generated JSON/MD/XLSX outputs, gitignored (contains live
                           tenant data)
 logs/                     MCP tool-call logs, gitignored
@@ -250,17 +269,35 @@ is invented.
   the dashboard's log panel.
 - ✅ MCP "memory": `fusion_run_history` reads persisted `reports/po-analysis-*.json`
   snapshots and diffs the two most recent.
-- ✅ **Excel integration (xlwings), both directions, verified working:**
-  - Read: `excel/reference-prices.xlsx` → `read_reference_prices.py` →
-    `referencePrices.ts` → feeds `savingsAnalysis.ts`'s contract-variance check.
-    Confirmed: 3 reference prices loaded, $1.7M overpayment found.
-  - Write: `write_report.py` pushes the latest `reports/*.json` into a formatted,
-    live `reports/fusion-report.xlsx` (PO Summary / Savings Opportunity incl.
-    contract variance / Payables sheets, bold headers, currency formatting,
-    autofit). Runs visible by default (the demo moment) or `--hidden` for the
-    REST endpoint. Confirmed contents match the JSON source via a read-back check.
-  - REST: `POST /api/export-excel` triggers the hidden write, wired to the
-    dashboard's "Export to Excel" button.
+- ✅ **Excel integration (xlwings) — genuinely two-way, not just export, verified working:**
+  - **Live-attach**: `write_report.py` and `read_reference_prices.py` both check
+    `xw.apps.count` first — if Excel is already running with the workbook open,
+    they attach to that live session (`xw.Book(path)`) instead of spawning a
+    second hidden instance. Writes land directly in the visible sheet; reads see
+    whatever's currently in the live sheet.
+  - **Live unsaved-edit reads, confirmed with a real test**: opened
+    `reference-prices.xlsx`, typed a row via COM (simulating a person typing),
+    did NOT save, then ran `read_reference_prices.py` — it returned the unsaved
+    row with `liveAttached: true`. `referencePrices.ts` only caches the
+    disk-based read (by mtime); a live-attached read is never cached, so an
+    edit is picked up on the very next analysis call, not after a save.
+  - **In-workbook "Refresh from Fusion" button**: `add_refresh_button.py`
+    imports `xlwings.bas` directly into the workbook's own VBA project (not
+    dependent on Excel's global add-in — see "Known issues fixed" below for
+    why that mattered) and wires a button to `RunPython`, which calls
+    `refresh_from_reports.py` and rewrites the live sheets from
+    `xw.Book.caller()`. Tested by invoking the macro programmatically
+    (`book.macro('RefreshFromFusion')()`) — confirmed it updates the live
+    workbook. By design it re-reads the latest already-fetched `reports/*.json`
+    rather than triggering a fresh Fusion query itself (a 20s-2min live fetch
+    would freeze Excel's UI since RunPython blocks the calling thread).
+  - **Write**: `write_report.py`/`refresh_from_reports.py` share one module
+    (`report_sections.py`) so the CLI export and the in-Excel button always
+    produce identical sheets (PO Summary / Savings Opportunity incl. agreement
+    and contract variance / Payables — bold headers, currency formatting,
+    autofit).
+  - REST: `POST /api/export-excel` triggers the write (hidden only if no Excel
+    is already running), wired to the dashboard's "Export to Excel" button.
 - ✅ **Dashboard redesigned**: sidebar-nav "console" layout (not single-column
   scroll), sections for every analysis, live PO drill-down search box, Excel export
   button. Not yet visually verified in an actual browser by this session — REST
@@ -290,6 +327,33 @@ is invented.
   calls. **On a new machine, check this again** — the working interpreter name may
   be different there (`python`, `python3`, or a full path); grep for
   `spawn("python3"` in `src/` and adjust if `python3 -c "import xlwings"` fails.
+- **"Changing time period and refresh does nothing" — actually a 100+ second hang
+  with no loading indicator.** Root cause: `savingsAnalysis.ts` fetched PO lines
+  in a fully sequential for-loop (one API call per PO — 1,000+ round-trips on a
+  1-year window) and re-fetched all ~5,000 Fusion agreement lines from scratch
+  on every single call regardless of window size. Fixed three ways: (1) added
+  `mapWithConcurrency()` in `fusionClient.ts`, used for the line-fetch loop
+  (12 concurrent) and in `poDataset.ts`'s line→schedule→distribution fetches (8
+  concurrent) — cut PO drill-down from 40s+ to ~4s; (2) in-memory cache on
+  `fetchOpenAgreementLines()` (10 min TTL) since that data is identical on every
+  call — cut repeat savings-analysis calls from 100s+ to ~24s; (3) bumped the
+  agreement-lines page size from 200 to 500. Also added visible loading state
+  (disabled controls + "loading, can take 20-60s" text) to the dashboard so a
+  slow call never again looks like nothing is happening.
+- **xlwings Excel add-in silently didn't load via XLSTART** on this machine
+  (an already-running Excel instance had no `RunPython` — "Sub not defined"
+  compile error). Rather than debug why this Office install's startup folder
+  didn't pick it up, made the workbook self-contained instead: `xlwings.bas`
+  is imported directly into `fusion-report.xlsx`'s own VBA project by
+  `add_refresh_button.py`, so it doesn't depend on Excel's global add-in state
+  at all — more robust and portable to the new machine.
+- **`RunPython`'s default interpreter is plain `"python"`**, which resolves to
+  the wrong (no-xlwings) Python on this machine — same class of bug as the
+  Node-side one above, just on the VBA side. Fixed by `add_refresh_button.py`
+  writing an explicit `INTERPRETER_WIN` value (resolved via `python3 -c
+  "import sys; print(sys.executable)"`) into a hidden `xlwings.conf` sheet in
+  the workbook, which `xlwings.bas`'s `GetConfig` reads before falling back to
+  plain `"python"`.
 
 ## MCP registration status
 
