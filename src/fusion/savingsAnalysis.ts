@@ -1,0 +1,174 @@
+import { fetchAllPages } from "../fusionClient.js";
+import { isBulkImportBuyer, type PurchaseOrder } from "./poAnalysis.js";
+
+interface PoLine {
+  POLineId: number;
+  POHeaderId: number;
+  OrderNumber: string;
+  Description: string | null;
+  ItemId: number | null;
+  CategoryCode: string | null;
+  Category: string | null;
+  UOMCode: string;
+  UOM: string;
+  Quantity: number;
+  Price: number;
+  CurrencyCode: string;
+  Total: number;
+  SourceAgreementId: number | null;
+  SourceAgreementNumber: string | null;
+  NegotiatedFlag: boolean;
+}
+
+// A price spread beyond this ratio between the cheapest and priciest line for the "same"
+// description is treated as a data-quality issue (e.g. unrelated demo/seed data sharing a
+// generic description), not a genuine procurement finding — it's flagged for review instead
+// of counted in the credible savings total.
+const PRICE_RATIO_OUTLIER_THRESHOLD = 5;
+
+export interface MaverickSpend {
+  totalOrganicSpendUSD: number;
+  offContractSpendUSD: number;
+  offContractShare: number;
+  onContractLines: number;
+  offContractLines: number;
+  dataQualityFlag: boolean;
+  note: string | null;
+}
+
+export interface PriceVarianceGroup {
+  groupKey: string;
+  description: string;
+  category: string | null;
+  uom: string;
+  currency: string;
+  minPrice: number;
+  maxPrice: number;
+  priceRatio: number;
+  occurrences: number;
+  lostSavings: number;
+  lines: { orderNumber: string; price: number; quantity: number; lostSavings: number }[];
+}
+
+export interface SavingsAnalysisResult {
+  generatedAt: string;
+  windowDays: number;
+  sinceDate: string;
+  organicPoCount: number;
+  organicLineCount: number;
+  maverickSpend: MaverickSpend;
+  priceVariance: {
+    totalLostSavingsUSD: number;
+    groupsWithVariance: PriceVarianceGroup[];
+    totalFlaggedForReviewUSD: number;
+    flaggedForReview: PriceVarianceGroup[];
+  };
+}
+
+function groupKeyFor(line: PoLine): string {
+  if (line.ItemId != null) return `item:${line.ItemId}`;
+  const desc = (line.Description ?? "").trim().toLowerCase();
+  return `desc:${desc}|uom:${line.UOMCode}|cur:${line.CurrencyCode}`;
+}
+
+export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalysisResult> {
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const sinceDate = since.toISOString().slice(0, 10);
+
+  const rawHeaders = await fetchAllPages<PurchaseOrder>("purchaseOrders", {
+    q: `CreationDate>=${sinceDate}`,
+  });
+  const organicHeaders = rawHeaders.filter((h) => !isBulkImportBuyer(h.Buyer));
+  const organicHeaderIds = organicHeaders.map((h) => h.POHeaderId);
+
+  const allLines: PoLine[] = [];
+  for (const headerId of organicHeaderIds) {
+    const lines = await fetchAllPages<PoLine>(`purchaseOrders/${headerId}/child/lines`, {});
+    allLines.push(...lines);
+  }
+
+  // --- Maverick / off-contract spend ---
+  const usdLines = allLines.filter((l) => l.CurrencyCode === "USD");
+  const totalOrganicSpendUSD = usdLines.reduce((s, l) => s + l.Total, 0);
+  const offContractLines = usdLines.filter((l) => l.SourceAgreementId == null);
+  const offContractSpendUSD = offContractLines.reduce((s, l) => s + l.Total, 0);
+
+  const offContractShare = totalOrganicSpendUSD ? offContractSpendUSD / totalOrganicSpendUSD : 0;
+  const maverickSpendIsSuspicious = offContractShare > 0.95;
+
+  const maverickSpend: MaverickSpend = {
+    totalOrganicSpendUSD,
+    offContractSpendUSD,
+    offContractShare,
+    onContractLines: usdLines.length - offContractLines.length,
+    offContractLines: offContractLines.length,
+    dataQualityFlag: maverickSpendIsSuspicious,
+    note: maverickSpendIsSuspicious
+      ? "Off-contract share is implausibly high (>95%) — this Fusion environment's seed/demo data likely never populates SourceAgreementId, so this signal isn't meaningful here rather than reflecting a real governance gap."
+      : null,
+  };
+
+  // --- Price variance leakage (exact-description or same-item matches only) ---
+  const groups = new Map<string, PoLine[]>();
+  for (const line of usdLines) {
+    if (!line.Description && line.ItemId == null) continue;
+    const key = groupKeyFor(line);
+    const arr = groups.get(key) ?? [];
+    arr.push(line);
+    groups.set(key, arr);
+  }
+
+  const allGroups: PriceVarianceGroup[] = [];
+  for (const [key, lines] of groups) {
+    if (lines.length < 2) continue;
+    const prices = lines.map((l) => l.Price);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    if (maxPrice <= minPrice) continue;
+
+    const lineDetails = lines
+      .map((l) => ({
+        orderNumber: l.OrderNumber,
+        price: l.Price,
+        quantity: l.Quantity,
+        lostSavings: Math.max(0, l.Price - minPrice) * l.Quantity,
+      }))
+      .filter((l) => l.lostSavings > 0);
+
+    if (lineDetails.length === 0) continue;
+
+    allGroups.push({
+      groupKey: key,
+      description: lines[0].Description ?? `Item ${lines[0].ItemId}`,
+      category: lines[0].Category,
+      uom: lines[0].UOM,
+      currency: lines[0].CurrencyCode,
+      minPrice,
+      maxPrice,
+      priceRatio: minPrice > 0 ? maxPrice / minPrice : Infinity,
+      occurrences: lines.length,
+      lostSavings: lineDetails.reduce((s, l) => s + l.lostSavings, 0),
+      lines: lineDetails,
+    });
+  }
+
+  const groupsWithVariance = allGroups
+    .filter((g) => g.priceRatio <= PRICE_RATIO_OUTLIER_THRESHOLD)
+    .sort((a, b) => b.lostSavings - a.lostSavings);
+  const flaggedForReview = allGroups
+    .filter((g) => g.priceRatio > PRICE_RATIO_OUTLIER_THRESHOLD)
+    .sort((a, b) => b.lostSavings - a.lostSavings);
+
+  const totalLostSavingsUSD = groupsWithVariance.reduce((s, g) => s + g.lostSavings, 0);
+  const totalFlaggedForReviewUSD = flaggedForReview.reduce((s, g) => s + g.lostSavings, 0);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    windowDays,
+    sinceDate,
+    organicPoCount: organicHeaders.length,
+    organicLineCount: allLines.length,
+    maverickSpend,
+    priceVariance: { totalLostSavingsUSD, groupsWithVariance, totalFlaggedForReviewUSD, flaggedForReview },
+  };
+}

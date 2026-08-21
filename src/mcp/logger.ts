@@ -1,5 +1,7 @@
 import { mkdir, appendFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import path from "node:path";
+import { LOGS_DIR } from "../paths.js";
 
 export interface LogEntry {
   ts: string;
@@ -11,14 +13,12 @@ export interface LogEntry {
   error?: string;
 }
 
-const LOG_DIR = "logs";
-
 function logPathFor(date: Date): string {
-  return `${LOG_DIR}/mcp-${date.toISOString().slice(0, 10)}.jsonl`;
+  return path.join(LOGS_DIR, `mcp-${date.toISOString().slice(0, 10)}.jsonl`);
 }
 
 export async function logCall(entry: LogEntry): Promise<void> {
-  await mkdir(LOG_DIR, { recursive: true });
+  await mkdir(LOGS_DIR, { recursive: true });
   await appendFile(logPathFor(new Date(entry.ts)), JSON.stringify(entry) + "\n", "utf8");
 }
 

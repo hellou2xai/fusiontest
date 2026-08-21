@@ -1,5 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { runPoAnalysis } from "../fusion/poAnalysis.js";
+import { REPORTS_DIR } from "../paths.js";
 
 function formatCurrencyTotals(totals: Record<string, number>): string {
   const entries = Object.entries(totals).filter(([, v]) => v);
@@ -15,10 +17,10 @@ async function main() {
   console.log(`Fetched ${result.totalPurchaseOrders} purchase order(s) since ${result.sinceDate}.`);
   console.log(`  organic: ${result.organicPurchaseOrders}, bulk-import: ${result.bulkImportPurchaseOrders}`);
 
-  await mkdir("reports", { recursive: true });
+  await mkdir(REPORTS_DIR, { recursive: true });
   const stamp = result.generatedAt.slice(0, 10);
-  const jsonPath = `reports/po-analysis-${stamp}.json`;
-  const mdPath = `reports/po-analysis-${stamp}.md`;
+  const jsonPath = path.join(REPORTS_DIR, `po-analysis-${stamp}.json`);
+  const mdPath = path.join(REPORTS_DIR, `po-analysis-${stamp}.md`);
 
   await writeFile(jsonPath, JSON.stringify(result, null, 2), "utf8");
 

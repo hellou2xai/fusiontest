@@ -1,5 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import type { PoAnalysisResult } from "../fusion/poAnalysis.js";
+import { REPORTS_DIR } from "../paths.js";
 
 export interface HistorySnapshot {
   file: string;
@@ -9,8 +11,6 @@ export interface HistorySnapshot {
   bulkImportPurchaseOrders: number;
   organicTotalByCurrency: Record<string, number>;
 }
-
-const REPORTS_DIR = "reports";
 
 /** Lists all persisted po-analysis snapshots, oldest to newest. */
 export async function listHistory(): Promise<HistorySnapshot[]> {
@@ -25,7 +25,7 @@ export async function listHistory(): Promise<HistorySnapshot[]> {
 
   const snapshots: HistorySnapshot[] = [];
   for (const file of jsonFiles) {
-    const content = await readFile(`${REPORTS_DIR}/${file}`, "utf8");
+    const content = await readFile(path.join(REPORTS_DIR, file), "utf8");
     const data = JSON.parse(content) as PoAnalysisResult;
     snapshots.push({
       file,

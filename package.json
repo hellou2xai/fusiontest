@@ -7,6 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "po:analyze": "tsx src/agents/poAnalysis.ts",
+    "savings:analyze": "tsx src/agents/savingsAnalysis.ts",
+    "po:full": "tsx src/agents/poFull.ts",
+    "payables:analyze": "tsx src/agents/payablesAnalysis.ts",
     "mcp:stdio": "tsx src/mcp/stdioServer.ts",
     "mcp:http": "tsx src/mcp/httpServer.ts"
   },
