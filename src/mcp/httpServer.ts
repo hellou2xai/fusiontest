@@ -2,12 +2,17 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createMcpServer } from "./registerTools.js";
 import { runPoAnalysis } from "../fusion/poAnalysis.js";
+import { runSavingsAnalysis } from "../fusion/savingsAnalysis.js";
+import { runPayablesAnalysis } from "../fusion/payablesAnalysis.js";
+import { fetchCompletePoDataset } from "../fusion/poDataset.js";
 import { getTrend } from "./history.js";
 import { readRecentLogs } from "./logger.js";
 import { config } from "../config.js";
+import { PROJECT_ROOT } from "../paths.js";
 
 const PORT = Number(process.env.MCP_HTTP_PORT ?? 8787);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,6 +68,49 @@ async function main() {
         const limit = url.searchParams.get("limit");
         const result = await readRecentLogs(limit ? Number(limit) : 50);
         sendJson(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === "/api/savings-analysis") {
+        const result = await runSavingsAnalysis(daysParam(url) ?? 90);
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === "/api/payables-analysis") {
+        const result = await runPayablesAnalysis(daysParam(url) ?? 90);
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === "/api/po-full") {
+        const orderNumber = url.searchParams.get("orderNumber");
+        if (!orderNumber) {
+          sendJson(res, 400, { error: "orderNumber query param is required" });
+          return;
+        }
+        const result = await fetchCompletePoDataset(orderNumber);
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === "/api/export-excel" && req.method === "POST") {
+        const scriptPath = path.join(PROJECT_ROOT, "excel", "write_report.py");
+        const proc = spawn("python3", [scriptPath, "--hidden"], { cwd: PROJECT_ROOT });
+        let stdout = "";
+        let stderr = "";
+        proc.stdout.on("data", (c) => (stdout += c));
+        proc.stderr.on("data", (c) => (stderr += c));
+        proc.on("close", (code) => {
+          if (code === 0) {
+            sendJson(res, 200, { status: "ok", message: stdout.trim() });
+          } else {
+            sendJson(res, 500, { status: "error", message: stderr.trim() || "Excel export failed" });
+          }
+        });
+        proc.on("error", (err) => {
+          sendJson(res, 500, { status: "error", message: err.message });
+        });
         return;
       }
 

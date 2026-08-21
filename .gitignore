@@ -3,5 +3,7 @@ dist/
 .env
 reports/*.json
 reports/*.md
+reports/*.xlsx
 !reports/.gitkeep
 logs/
+~$*.xlsx

@@ -36,6 +36,19 @@ async function main() {
     }
   }
 
+  console.log(`\n--- Contract-price variance (vs. excel/reference-prices.xlsx) ---`);
+  if (result.contractVariance.referencePricesLoaded === 0) {
+    console.log(`  No reference prices loaded — run "python excel/create_reference_template.py" and fill in real rates.`);
+  } else {
+    console.log(`  ${result.contractVariance.referencePricesLoaded} reference price(s) loaded.`);
+    console.log(`  Total overpaid vs. contracted rate: $${usd(result.contractVariance.totalOverpaidUSD)}`);
+    for (const l of result.contractVariance.lines.slice(0, 10)) {
+      console.log(
+        `    ${l.orderNumber} "${l.description}" — contracted $${usd(l.contractedUnitPrice)}, paid $${usd(l.paidUnitPrice)}, overpaid $${usd(l.overpaid)}`
+      );
+    }
+  }
+
   await mkdir(REPORTS_DIR, { recursive: true });
   const stamp = result.generatedAt.slice(0, 10);
   const jsonPath = path.join(REPORTS_DIR, `savings-analysis-${stamp}.json`);

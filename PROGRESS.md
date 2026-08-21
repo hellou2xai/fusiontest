@@ -1,19 +1,18 @@
 # fusiontest — Oracle Fusion agent tooling — progress notes
 
-Last updated: 2026-08-21, end of session. Written for continuation on a different
-machine — read this before doing anything else.
+Last updated: 2026-08-21, end of session (second pass). Written for continuation on
+a different machine — read this before doing anything else.
 
 ## What this project is
 
 Agents for Oracle Fusion Cloud ERP, built against a live (shared, multi-tenant demo)
 Oracle Fusion instance via its REST API. Goal stated by the user: build agent
-capabilities for procurement/finance analysis, demoable both as a CLI, as an MCP
-server other AI assistants can call, and as a live HTML dashboard — and have all
-three surfaces return identical numbers.
+capabilities for procurement/finance analysis, demoable as a CLI, as an MCP server
+other AI assistants can call, as a live HTML dashboard, and with bidirectional Excel
+integration via xlwings — with all surfaces returning identical numbers.
 
 GitHub remote is configured (`origin` → `https://github.com/hellou2xai/fusiontest`)
-but **nothing has been pushed yet** — only local commits on `master`. Push explicitly
-if you want it on GitHub.
+and **has been pushed** — `master` is up to date on GitHub as of this session.
 
 ## Environments
 
@@ -39,6 +38,12 @@ exist on a fresh clone/machine. To continue on a new machine:
    root (`src/paths.ts`, and `src/config.ts` resolves `.env` relative to its own file
    location), **not** to whatever directory a command happens to be launched from.
    This was a real bug fixed this session (see "Known issues fixed" below).
+4. For the Excel features: `pip install xlwings` (or confirm it's already installed)
+   and make sure a real Excel install is on the machine — xlwings drives Excel live
+   via COM (Windows) and only works if Excel itself is installed, not just the Python
+   package. **Check which `python`/`python3` on the new machine actually has xlwings**
+   — this machine had two Python installs and only one had it; see "Known issues
+   fixed" below, it will very likely bite you again on a different machine.
 
 ## Architecture
 
@@ -58,30 +63,55 @@ src/
   fusion/
     poAnalysis.ts          Core: PO headers in a window, organic vs bulk-import split,
                             group-bys (status/supplier/buyer/BU)
-    savingsAnalysis.ts      Maverick (off-contract) spend + price-variance leakage,
-                            with outlier filtering (see below)
+    savingsAnalysis.ts      Maverick (off-contract) spend, price-variance leakage
+                            (with outlier filtering), AND contract-price variance
+                            (reads excel/reference-prices.xlsx via referencePrices.ts)
     poDataset.ts            Single-PO deep drill: header -> lines -> schedules ->
                             distributions (the "complete dataset" ask)
     payablesAnalysis.ts     Invoices matched to POs, paid/unpaid status
+  excel/
+    referencePrices.ts      Node->Python bridge: spawns excel/read_reference_prices.py,
+                            parses its JSON stdout. Returns [] on any failure (Excel
+                            integration is best-effort, never blocks the rest of the
+                            analysis).
   agents/                 CLI entrypoints, one per analysis (thin wrappers)
     poAnalysis.ts            npm run po:analyze          (default: 30 days)
     savingsAnalysis.ts        npm run savings:analyze -- <days>   (default: 90)
     poFull.ts                 npm run po:full -- <OrderNumber>
     payablesAnalysis.ts       npm run payables:analyze -- <days>  (default: 90)
   mcp/
-    registerTools.ts        MCP tool registrations — ONLY wraps poAnalysis.ts today
-                            (fusion_po_analysis, fusion_context, fusion_run_history,
-                            fusion_tool_log). savingsAnalysis/poDataset/payables are
-                            NOT yet exposed as MCP tools — see Next Steps.
+    registerTools.ts        MCP tool registrations — ALL FOUR analyses now exposed:
+                            fusion_po_analysis, fusion_context, fusion_run_history,
+                            fusion_tool_log, fusion_savings_analysis,
+                            fusion_payables_analysis, fusion_po_full (7 tools total)
     stdioServer.ts           npm run mcp:stdio  — for Claude Code/Desktop
     httpServer.ts            npm run mcp:http   — serves /mcp (protocol), /api/*
-                            (REST), /dashboard (HTML) all on one port (8787)
+                            (REST), /dashboard (HTML) all on one port (8787).
+                            REST routes: /api/po-analysis, /api/savings-analysis,
+                            /api/payables-analysis, /api/po-full?orderNumber=X,
+                            /api/history, /api/logs, POST /api/export-excel
     logger.ts                Structured JSONL logging of every MCP tool call to
                             logs/mcp-<date>.jsonl (observability)
     history.ts               Reads persisted reports/po-analysis-*.json snapshots,
                             computes trend deltas (memory of past runs)
-    public/dashboard.html   Live-fetching dashboard, polls /api/* every 30s
-reports/                  Generated JSON/MD outputs, gitignored (contains live
+    public/dashboard.html   Redesigned: sidebar-nav "console" layout, sections for
+                            Overview / Purchase Orders / Savings Opportunity /
+                            Payables / PO Drill-down (live search by order number) /
+                            Run History / Tool Log, plus an "Export to Excel" button
+                            wired to POST /api/export-excel
+excel/
+  create_reference_template.py  Run once to seed excel/reference-prices.xlsx
+  reference-prices.xlsx         The negotiated-rate reference file (NOT gitignored
+                            currently — contains only example/placeholder rates
+                            right now, safe to commit; replace with real rates and
+                            reconsider before committing real contract data)
+  read_reference_prices.py      Headless (visible=False) read, called by
+                            referencePrices.ts as a subprocess
+  write_report.py               Writes reports/*.json into reports/fusion-report.xlsx
+                            (gitignored). Visible by default (demo moment — watching
+                            Excel populate live); --hidden flag used by the REST
+                            export endpoint
+reports/                  Generated JSON/MD/XLSX outputs, gitignored (contains live
                           tenant data)
 logs/                     MCP tool-call logs, gitignored
 ```
@@ -135,28 +165,53 @@ history. Several filters exist specifically to keep numbers honest:
    are likely inflated by the same synthetic-data phenomenon as maverick spend. **No
    outlier filter has been added here yet** — treat the raw payables dollar totals as
    directional only, not demo-ready numbers, until this is addressed (see Next Steps).
+5. **Contract-price variance is the strongest, most defensible signal built** — it
+   compares actual PO line prices against `excel/reference-prices.xlsx` (a real
+   negotiated-rate reference), so there's no fuzzy description-matching or outlier
+   guesswork involved. Verified result: **$1.7M overpaid vs. contracted rates** on
+   just 3 loaded reference prices. The catch: the reference file currently only has
+   3 EXAMPLE rows (chosen to match categories already seen in the price-variance
+   findings) — **replace with real negotiated rates** before presenting this as a
+   real number. This is the one savings signal worth demoing without heavy caveats
+   once real rates are in the file.
 
 ## What's built and verified working (this session)
 
 - ✅ `npm run po:analyze` — 30-day PO analysis, writes `reports/po-analysis-<date>.{json,md}`
-- ✅ `npm run savings:analyze -- 90` — maverick spend + price-variance, with outlier
-  filtering. Tested end to end on live data.
+- ✅ `npm run savings:analyze -- 90` — maverick spend + price-variance (with outlier
+  filtering) + contract-price variance (Excel-backed). Tested end to end on live data.
 - ✅ `npm run po:full -- <OrderNumber>` — complete document-flow drill for one PO
   (header → lines → schedules → distributions). Tested on `SU617111` (24 lines).
 - ✅ `npm run payables:analyze -- 90` — invoice-to-PO matching. Tested end to end.
-- ✅ `npm run mcp:stdio` — MCP server over stdio, 4 tools registered and verified via
-  a manual JSON-RPC smoke test (initialize + tools/list + tools/call all confirmed).
-- ✅ `npm run mcp:http` — same 4 tools over HTTP (`/mcp`), plus REST (`/api/po-analysis`,
-  `/api/history`, `/api/logs`) and the live dashboard (`/dashboard`). Verified all
-  three protocols return identical numbers.
+- ✅ `npm run mcp:stdio` — MCP server over stdio, **7 tools** registered (all four
+  analyses) — smoke-tested via manual JSON-RPC (initialize + tools/list + tools/call).
+- ✅ `npm run mcp:http` — same 7 tools over HTTP (`/mcp`), plus REST endpoints for
+  every analysis and the live dashboard (`/dashboard`). Verified CLI/MCP/REST all
+  return identical numbers for the same inputs.
 - ✅ MCP tool-call observability: every call logged to `logs/mcp-<date>.jsonl`
   (tool, args, duration, status, record count), surfaced via `fusion_tool_log` and
   the dashboard's log panel.
 - ✅ MCP "memory": `fusion_run_history` reads persisted `reports/po-analysis-*.json`
   snapshots and diffs the two most recent.
-- ✅ Published dashboard Artifact (one-off, point-in-time):
-  `https://claude.ai/code/artifact/a67b212f-adff-4383-97a3-0466319e14a0` — this is
-  static, not the live one at `/dashboard`.
+- ✅ **Excel integration (xlwings), both directions, verified working:**
+  - Read: `excel/reference-prices.xlsx` → `read_reference_prices.py` →
+    `referencePrices.ts` → feeds `savingsAnalysis.ts`'s contract-variance check.
+    Confirmed: 3 reference prices loaded, $1.7M overpayment found.
+  - Write: `write_report.py` pushes the latest `reports/*.json` into a formatted,
+    live `reports/fusion-report.xlsx` (PO Summary / Savings Opportunity incl.
+    contract variance / Payables sheets, bold headers, currency formatting,
+    autofit). Runs visible by default (the demo moment) or `--hidden` for the
+    REST endpoint. Confirmed contents match the JSON source via a read-back check.
+  - REST: `POST /api/export-excel` triggers the hidden write, wired to the
+    dashboard's "Export to Excel" button.
+- ✅ **Dashboard redesigned**: sidebar-nav "console" layout (not single-column
+  scroll), sections for every analysis, live PO drill-down search box, Excel export
+  button. Not yet visually verified in an actual browser by this session — REST
+  endpoints it depends on were all individually curl-tested and confirmed working,
+  but nobody has looked at the rendered page.
+- ✅ Published dashboard Artifact (one-off, point-in-time, from *before* this second
+  pass): `https://claude.ai/code/artifact/a67b212f-adff-4383-97a3-0466319e14a0` —
+  static and now out of date; the live one is at `/dashboard`.
 
 ## Known issues fixed this session
 
@@ -169,6 +224,15 @@ history. Several filters exist specifically to keep numbers honest:
   at server startup and reused it for every request — broke on the second request
   (500 error). Fixed by creating a fresh transport + MCP server per request, per the
   SDK's documented stateless pattern (`src/mcp/httpServer.ts`).
+- **Wrong Python resolved for xlwings**: this machine has two Python installs —
+  plain `python` resolves to 3.12 (no xlwings), `python3` resolves to 3.13 (has
+  xlwings). Both `referencePrices.ts` and the `/api/export-excel` route in
+  `httpServer.ts` originally called `spawn("python", ...)` and silently got the
+  wrong interpreter (contract-variance came back empty with a swallowed
+  `ModuleNotFoundError` in stderr). Fixed by hardcoding `python3` in both spawn
+  calls. **On a new machine, check this again** — the working interpreter name may
+  be different there (`python`, `python3`, or a full path); grep for
+  `spawn("python3"` in `src/` and adjust if `python3 -c "import xlwings"` fails.
 
 ## MCP registration status
 
@@ -187,7 +251,8 @@ history. Several filters exist specifically to keep numbers honest:
 
 ## Demo ideas discussed (not yet built)
 
-- The dashboard/CLI/MCP tools built so far are all **read-only**. The user asked
+- Everything built so far is **read-only** against Fusion (Excel write is the one
+  exception — that's a presentation layer, not a Fusion mutation). The user asked
   about a "mindblowing demo" — recommendation given was: live natural-language
   queries against real Fusion data (works today) as the baseline wow, with a
   **guarded write-back tool** (e.g. flag/comment/approve a PO, with dry-run +
@@ -196,21 +261,22 @@ history. Several filters exist specifically to keep numbers honest:
 
 ## Next steps (prioritized)
 
-1. **Wire `savingsAnalysis`, `poDataset`, `payablesAnalysis` into MCP + dashboard.**
-   Only `poAnalysis` is exposed as MCP tools / dashboard panels today. The other
-   three exist as solid, tested CLI-only capabilities — same "single source of
-   truth, multiple surfaces" pattern should be applied to them (add
-   `registerTool` entries in `src/mcp/registerTools.ts`, REST routes in
-   `httpServer.ts`, dashboard panels).
-2. **Add outlier/sanity filtering to `payablesAnalysis.ts`**, mirroring what
+1. **Put real negotiated rates into `excel/reference-prices.xlsx`.** It currently
+   only has 3 example rows. This is the highest-leverage next step — contract-price
+   variance is the most defensible savings signal built, and it's only as good as
+   the reference data in the file.
+2. **Visually QA the redesigned dashboard in an actual browser.** It was built and
+   every REST endpoint it calls was individually curl-tested, but nobody has loaded
+   `http://localhost:8787/dashboard` and looked at it — check the sidebar layout,
+   the PO drill-down search, and the Export to Excel button actually work end to
+   end from the UI, not just via curl.
+3. **Add outlier/sanity filtering to `payablesAnalysis.ts`**, mirroring what
    `savingsAnalysis.ts` already does — the raw non-PO invoice totals are currently
    not demo-credible for the same reason the pre-fix savings numbers weren't.
-3. **Resolve MCP project-scope approval** on whatever machine is used next — see
+4. **Resolve MCP project-scope approval** on whatever machine is used next — see
    "MCP registration status" above.
-4. **Consider tightening price-variance grouping** (e.g. add Supplier to the group
+5. **Consider tightening price-variance grouping** (e.g. add Supplier to the group
    key, not just Description+UOM) if the current 5x-ratio outlier filter alone isn't
-   convincing enough for a live audience — this was discussed as an alternative/
-   additional fix but not implemented (outlier filtering alone was chosen).
-5. **Write-back capability** for the "mindblowing demo" upgrade — not started, needs
+   convincing enough for a live audience — discussed but not implemented.
+6. **Write-back capability** for the "mindblowing demo" upgrade — not started, needs
    explicit scoping (which action, what guardrails) before building.
-6. Nothing has been pushed to GitHub yet — decide if/when to `git push`.

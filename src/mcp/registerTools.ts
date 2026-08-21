@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runPoAnalysis } from "../fusion/poAnalysis.js";
+import { runSavingsAnalysis } from "../fusion/savingsAnalysis.js";
+import { runPayablesAnalysis } from "../fusion/payablesAnalysis.js";
+import { fetchCompletePoDataset } from "../fusion/poDataset.js";
 import { getTrend } from "./history.js";
 import { readRecentLogs, withLogging } from "./logger.js";
 import { config } from "../config.js";
@@ -102,6 +105,72 @@ export function createServer(): McpServer {
     },
     async (args) => {
       const result = await logsLogged(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  const savingsLogged = withLogging(
+    "fusion_savings_analysis",
+    async (args: { days?: number }) => runSavingsAnalysis(args.days ?? 90),
+    (r) => r.organicLineCount
+  );
+
+  server.registerTool(
+    "fusion_savings_analysis",
+    {
+      title: "Oracle Fusion Savings Opportunity Analysis",
+      description:
+        "Analyzes purchase order lines over the last N days for savings opportunity: off-contract (maverick) spend, " +
+        "price-variance leakage (same item bought at different prices, with outlier filtering to exclude implausible " +
+        "demo-data noise), and contract-price variance against excel/reference-prices.xlsx when available. Returns " +
+        "credible findings separately from flagged-for-review ones.",
+      inputSchema: { days: z.number().int().min(1).max(365).optional().describe("Lookback window in days (default 90)") },
+    },
+    async (args) => {
+      const result = await savingsLogged(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  const payablesLogged = withLogging(
+    "fusion_payables_analysis",
+    async (args: { days?: number }) => runPayablesAnalysis(args.days ?? 90),
+    (r) => r.totalInvoices
+  );
+
+  server.registerTool(
+    "fusion_payables_analysis",
+    {
+      title: "Oracle Fusion Payables Analysis",
+      description:
+        "Analyzes AP invoices created in the last N days: how many are matched to a purchase order vs. non-PO, " +
+        "matched/unmatched USD amounts, and paid/unpaid status breakdown.",
+      inputSchema: { days: z.number().int().min(1).max(365).optional().describe("Lookback window in days (default 90)") },
+    },
+    async (args) => {
+      const result = await payablesLogged(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  const poFullLogged = withLogging(
+    "fusion_po_full",
+    async (args: { orderNumber: string }) => fetchCompletePoDataset(args.orderNumber),
+    (r) => r.lines.length
+  );
+
+  server.registerTool(
+    "fusion_po_full",
+    {
+      title: "Oracle Fusion Complete PO Document Flow",
+      description:
+        "Fetches the complete document flow for a single purchase order by order number: header, lines, schedules " +
+        "(with receiving and billing status: ordered/received/billed amounts and quantities), and GL distribution " +
+        "accounts for each schedule.",
+      inputSchema: { orderNumber: z.string().describe("The PO order number, e.g. SU617111") },
+    },
+    async (args) => {
+      const result = await poFullLogged(args);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );

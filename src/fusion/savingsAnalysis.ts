@@ -1,5 +1,6 @@
 import { fetchAllPages } from "../fusionClient.js";
 import { isBulkImportBuyer, type PurchaseOrder } from "./poAnalysis.js";
+import { readReferencePrices } from "../excel/referencePrices.js";
 
 interface PoLine {
   POLineId: number;
@@ -50,6 +51,16 @@ export interface PriceVarianceGroup {
   lines: { orderNumber: string; price: number; quantity: number; lostSavings: number }[];
 }
 
+export interface ContractVarianceLine {
+  orderNumber: string;
+  description: string;
+  contractedUnitPrice: number;
+  paidUnitPrice: number;
+  quantity: number;
+  overpaid: number;
+  currency: string;
+}
+
 export interface SavingsAnalysisResult {
   generatedAt: string;
   windowDays: number;
@@ -62,6 +73,11 @@ export interface SavingsAnalysisResult {
     groupsWithVariance: PriceVarianceGroup[];
     totalFlaggedForReviewUSD: number;
     flaggedForReview: PriceVarianceGroup[];
+  };
+  contractVariance: {
+    referencePricesLoaded: number;
+    totalOverpaidUSD: number;
+    lines: ContractVarianceLine[];
   };
 }
 
@@ -162,6 +178,32 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
   const totalLostSavingsUSD = groupsWithVariance.reduce((s, g) => s + g.lostSavings, 0);
   const totalFlaggedForReviewUSD = flaggedForReview.reduce((s, g) => s + g.lostSavings, 0);
 
+  // --- Contract-price variance (authoritative: compares against a real negotiated rate
+  // from excel/reference-prices.xlsx, not inferred from noisy peer purchases) ---
+  const referencePrices = await readReferencePrices();
+  const referenceByKey = new Map(
+    referencePrices.map((r) => [`${r.Description.trim().toLowerCase()}|${r.Currency}`, r])
+  );
+
+  const contractVarianceLines: ContractVarianceLine[] = [];
+  for (const line of usdLines) {
+    if (!line.Description) continue;
+    const ref = referenceByKey.get(`${line.Description.trim().toLowerCase()}|${line.CurrencyCode}`);
+    if (!ref) continue;
+    const overpaid = Math.max(0, line.Price - ref.ContractedUnitPrice) * line.Quantity;
+    if (overpaid <= 0) continue;
+    contractVarianceLines.push({
+      orderNumber: line.OrderNumber,
+      description: line.Description,
+      contractedUnitPrice: ref.ContractedUnitPrice,
+      paidUnitPrice: line.Price,
+      quantity: line.Quantity,
+      overpaid,
+      currency: line.CurrencyCode,
+    });
+  }
+  contractVarianceLines.sort((a, b) => b.overpaid - a.overpaid);
+
   return {
     generatedAt: new Date().toISOString(),
     windowDays,
@@ -170,5 +212,10 @@ export async function runSavingsAnalysis(windowDays = 90): Promise<SavingsAnalys
     organicLineCount: allLines.length,
     maverickSpend,
     priceVariance: { totalLostSavingsUSD, groupsWithVariance, totalFlaggedForReviewUSD, flaggedForReview },
+    contractVariance: {
+      referencePricesLoaded: referencePrices.length,
+      totalOverpaidUSD: contractVarianceLines.reduce((s, l) => s + l.overpaid, 0),
+      lines: contractVarianceLines,
+    },
   };
 }
